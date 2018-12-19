@@ -3,6 +3,8 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.test import TestCase, Client, override_settings
 from django.contrib.auth.models import User
 from django.db import models
+
+from softdelete.models import _determine_change_set
 from softdelete.test_softdelete_app.models import (
     TestModelOne,
     TestModelTwo,
@@ -109,15 +111,19 @@ class DeleteTest(BaseTest):
 
     def pre_soft_delete(self, *args, **kwargs):
         self.pre_soft_delete_called = True
+        self.pre_soft_delete_kwargs = kwargs
 
     def post_soft_delete(self, *args, **kwargs):
         self.post_soft_delete_called = True
+        self.post_soft_delete_kwargs = kwargs
 
     def _pretest(self):
         self.pre_delete_called = False
         self.post_delete_called = False
         self.pre_soft_delete_called = False
         self.post_soft_delete_called = False
+        self.pre_soft_delete_kwargs = None
+        self.post_soft_delete_kwargs = None
         models.signals.pre_delete.connect(self.pre_delete)
         models.signals.post_delete.connect(self.post_delete)
         pre_soft_delete.connect(self.pre_soft_delete)
@@ -148,7 +154,13 @@ class DeleteTest(BaseTest):
         self.tmo1.delete()
         self.assertEquals(self.cs_count+1, ChangeSet.objects.count())
         self.assertEquals(self.rs_count+56, SoftDeleteRecord.objects.count())
+
+        changeset = ChangeSet.objects.latest('created_date')
+        self.assertEquals(changeset, self.pre_soft_delete_kwargs['changeset'])
+        self.assertEquals(changeset, self.post_soft_delete_kwargs['changeset'])
+
         self._posttest()
+
 
     def test_hard_delete(self):
         self._pretest()

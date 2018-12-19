@@ -267,6 +267,7 @@ class SoftDeleteObject(models.Model):
                                                using=using)
             pre_soft_delete.send(sender=self.__class__,
                                  instance=self,
+                                 changeset=cs,
                                  using=using)
             logging.debug('SOFT DELETING type: %s, %s', type(self), self)
 
@@ -293,6 +294,7 @@ class SoftDeleteObject(models.Model):
                                                     using=using)
                 post_soft_delete.send(sender=self.__class__,
                                       instance=self,
+                                      changeset=cs,
                                       using=using)
 
     def _do_undelete(self, using='default'):
