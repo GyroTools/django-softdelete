@@ -3,11 +3,13 @@ from __future__ import unicode_literals
 import django
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db.models import query
 from django.db import models
 from django.core.exceptions import ObjectDoesNotExist
 from django.contrib.contenttypes.models import ContentType
 from django.utils.encoding import python_2_unicode_compatible
+
 try:
     from django.contrib.contenttypes.fields import GenericForeignKey
 except ImportError:
@@ -23,7 +25,7 @@ except:
     USE_SOFTDELETE_GROUP = False
 
 
-def _determine_change_set(obj, create=True):
+def _determine_change_set(obj, create=True, user=None):
     try:
         qs = SoftDeleteRecord.objects.filter(content_type=ContentType.objects.get_for_model(obj),
                                              object_id=str(obj.pk)).latest('created_date').changeset
@@ -31,12 +33,14 @@ def _determine_change_set(obj, create=True):
     except:
         try:
             qs = ChangeSet.objects.filter(content_type=ContentType.objects.get_for_model(obj),
-                                          object_id=str(obj.pk)).latest('created_date')
+                                          object_id=str(obj.pk),
+                                          user=user).latest('created_date')
             logging.debug("Found changeset")
         except:
             if create:
                 qs = ChangeSet.objects.create(content_type=ContentType.objects.get_for_model(obj),
-                                              object_id=str(obj.pk))
+                                              object_id=str(obj.pk),
+                                              user=user)
                 logging.debug("Creating changeset")
             else:
                 logging.debug("Raising ObjectDoesNotExist")
@@ -53,10 +57,11 @@ class SoftDeleteQuerySet(query.QuerySet):
     def delete(self, using='default', *args, **kwargs):
         if not len(self):
             return
+        user = kwargs.get('user', None)
         cs = kwargs.get('changeset')
         logging.debug("STARTING QUERYSET SOFT-DELETE: %s. %s", self, len(self))
         for obj in self:
-            rs, c = SoftDeleteRecord.objects.get_or_create(changeset=cs or _determine_change_set(obj),
+            rs, c = SoftDeleteRecord.objects.get_or_create(changeset=cs or _determine_change_set(obj, user=user),
                                                            content_type=ContentType.objects.get_for_model(obj),
                                                            object_id=str(obj.pk))
             logging.debug(" -----  CALLING delete() on %s", obj)
@@ -213,19 +218,32 @@ class SoftDeleteObject(models.Model):
                     qs.delete()
 
     def delete(self, *args, **kwargs):
+        """
+        Delete this instance.
+
+        If deleted_at is not set a soft delete will be done.
+
+        kwargs:
+            force_policy: override the softdelete_policy (only affect in case of a soft delete)
+            user: bind the ChangeSet to the given user model.
+            changeset: use the given ChangeSet to add SoftDeleteRecords (only affect in case of a soft delete)
+        """
         policy = kwargs.get('force_policy', self.softdelete_policy)
+        user = kwargs.get('user', None)
 
         if self.deleted_at:
             logging.debug("HARD DELETEING type %s, %s", type(self), self)
             try:
                 cs = ChangeSet.objects.get(
                     content_type=ContentType.objects.get_for_model(self),
-                    object_id=self.pk)
+                    object_id=self.pk,
+                    user=user)
                 cs.delete()
+                kwargs.pop('user', None)
                 super(SoftDeleteObject, self).delete(*args, **kwargs)
             except:
                 try:
-                    cs = kwargs.get('changeset') or _determine_change_set(self)
+                    cs = kwargs.get('changeset') or _determine_change_set(self, user=user)
                     rs = SoftDeleteRecord.objects.get(
                         changeset=cs,
                         content_type=ContentType.objects.get_for_model(self),
@@ -239,6 +257,9 @@ class SoftDeleteObject(models.Model):
                     pass
         elif policy in [self.SOFT_DELETE, self.SOFT_DELETE_CASCADE]:
             using = kwargs.get('using', settings.DATABASES['default'])
+            cs = kwargs.get('changeset') or _determine_change_set(self, user=user)
+
+
             models.signals.pre_delete.send(sender=self.__class__,
                                            instance=self,
                                            using=using)
@@ -246,7 +267,7 @@ class SoftDeleteObject(models.Model):
                                  instance=self,
                                  using=using)
             logging.debug('SOFT DELETING type: %s, %s', type(self), self)
-            cs = kwargs.get('changeset') or _determine_change_set(self)
+
             SoftDeleteRecord.objects.get_or_create(
                 changeset=cs,
                 content_type=ContentType.objects.get_for_model(self),
@@ -263,6 +284,7 @@ class SoftDeleteObject(models.Model):
                 for x in all_related:
                     self._do_delete(cs, x)
                 logging.debug("FINISHED SOFT DELETING RELATED %s", self)
+
                 models.signals.post_delete.send(sender=self.__class__,
                                                 instance=self,
                                                 using=using)
@@ -282,7 +304,8 @@ class SoftDeleteObject(models.Model):
 
     def undelete(self, using='default', *args, **kwargs):
         logging.debug('UNDELETING %s' % self)
-        cs = kwargs.get('changeset') or _determine_change_set(self, False)
+        user = kwargs.get('user', None)
+        cs = kwargs.get('changeset') or _determine_change_set(self, False, user=user)
         cs.undelete(using)
         logging.debug('FINISHED UNDELETING RELATED %s', self)
 
@@ -295,6 +318,12 @@ class SoftDeleteObject(models.Model):
             else:
                 self.delete()
 
+
+class ChangeSetManager(models.Manager):
+    def for_user(self, user):
+        return self.filter(user=user)
+
+
 @python_2_unicode_compatible
 class ChangeSet(models.Model):
     created_date = models.DateTimeField(default=timezone.now)
@@ -302,10 +331,14 @@ class ChangeSet(models.Model):
     object_id = models.CharField(max_length=100)
     record = GenericForeignKey('content_type', 'object_id')
 
+    user = models.ForeignKey(get_user_model(), on_delete=models.CASCADE, blank=True, null=True)
+
     class Meta:
         index_together = [
             ("content_type", "object_id"),
         ]
+
+    objects = ChangeSetManager()
 
     def get_content(self):
         model_class = self.content_type.model_class()

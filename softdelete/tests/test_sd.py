@@ -1,6 +1,6 @@
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
-from django.test import TestCase, Client
+from django.test import TestCase, Client, override_settings
 from django.contrib.auth.models import User
 from django.db import models
 from softdelete.test_softdelete_app.models import (
@@ -199,6 +199,7 @@ class DeleteTest(BaseTest):
         self.assertEquals(self.rs_count+56, SoftDeleteRecord.objects.count())
         self._posttest()
 
+
 class AdminTest(BaseTest):
     def test_admin(self):
         client = Client()
@@ -336,3 +337,81 @@ class SoftDeleteRelatedFieldLookupsTests(BaseTest):
         t31.delete()
         self.assertRaises(TestModelThree.DoesNotExist,
                           self.tmo1.testmodelthree_set.get, extra_int=100)
+
+
+class DeleteWithUserTest(BaseTest):
+    def pre_delete(self, *args, **kwargs):
+        self.pre_delete_called = True
+
+    def post_delete(self, *args, **kwargs):
+        self.post_delete_called = True
+
+    def pre_soft_delete(self, *args, **kwargs):
+        self.pre_soft_delete_called = True
+
+    def post_soft_delete(self, *args, **kwargs):
+        self.post_soft_delete_called = True
+
+    def _pretest(self):
+        self.pre_delete_called = False
+        self.post_delete_called = False
+        self.pre_soft_delete_called = False
+        self.post_soft_delete_called = False
+        models.signals.pre_delete.connect(self.pre_delete)
+        models.signals.post_delete.connect(self.post_delete)
+        pre_soft_delete.connect(self.pre_soft_delete)
+        post_soft_delete.connect(self.post_soft_delete)
+        self.assertEquals(2, TestModelOne.objects.count())
+        self.assertEquals(10, TestModelTwo.objects.count())
+        self.assertFalse(self.tmo1.deleted)
+        self.assertFalse(self.pre_delete_called)
+        self.assertFalse(self.post_delete_called)
+        self.assertFalse(self.pre_soft_delete_called)
+        self.assertFalse(self.post_soft_delete_called)
+        self.cs_count = ChangeSet.objects.count()
+        self.rs_count = SoftDeleteRecord.objects.count()
+
+    def _posttest(self, user=None):
+        self.tmo1 = TestModelOne.objects.all_with_deleted().get(pk=self.tmo1.pk)
+        self.tmo2 = TestModelOne.objects.all_with_deleted().get(pk=self.tmo2.pk)
+        self.assertTrue(self.tmo1.deleted)
+        self.assertFalse(self.tmo2.deleted)
+        self.assertTrue(self.pre_delete_called)
+        self.assertTrue(self.post_delete_called)
+        self.assertTrue(self.pre_soft_delete_called)
+        self.assertTrue(self.post_soft_delete_called)
+        self.tmo1.undelete(user=user)
+
+    def test_delete(self):
+        self._pretest()
+        self.tmo1.delete(user=self.user)
+        self.assertEquals(self.cs_count + 1, ChangeSet.objects.count())
+        cs = ChangeSet.objects.get(user=self.user)
+        self.assertEqual(56, cs.soft_delete_records.count())
+
+        self.assertEquals(self.rs_count + 56, SoftDeleteRecord.objects.count())
+        self._posttest(user=self.user)
+
+    def test_hard_delete(self):
+        self._pretest()
+        tmo_tmp = TestModelOne.objects.create(extra_bool=True)
+        tmo_tmp.delete(user=self.user)
+        self.assertEquals(1, ChangeSet.objects.filter(user=self.user).count())
+        self.assertEquals(self.rs_count + 1, SoftDeleteRecord.objects.count())
+        tmo_tmp.delete(user=self.user)
+        self.assertEquals(0, ChangeSet.objects.filter(user=self.user).count())
+        self.assertEquals(self.cs_count, ChangeSet.objects.count())
+        self.assertEquals(self.rs_count, SoftDeleteRecord.objects.count())
+        self.assertRaises(TestModelOne.DoesNotExist,
+                          TestModelOne.objects.get,
+                          pk=tmo_tmp.pk)
+
+    def test_filter_delete(self):
+        self._pretest()
+        TestModelOne.objects.filter(pk=1).delete(user=self.user)
+        self.assertEquals(self.cs_count+1, ChangeSet.objects.count())
+        cs = ChangeSet.objects.get(user=self.user)
+        self.assertEqual(56, cs.soft_delete_records.count())
+
+        self.assertEquals(self.rs_count+56, SoftDeleteRecord.objects.count())
+        self._posttest(user=self.user)
