@@ -10,6 +10,8 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.contrib.contenttypes.models import ContentType
 from django.utils.encoding import python_2_unicode_compatible
 
+from softdelete.settings import send_delete_signal
+
 try:
     from django.contrib.contenttypes.fields import GenericForeignKey
 except ImportError:
@@ -259,10 +261,10 @@ class SoftDeleteObject(models.Model):
             using = kwargs.get('using', settings.DATABASES['default'])
             cs = kwargs.get('changeset') or _determine_change_set(self, user=user)
 
-
-            models.signals.pre_delete.send(sender=self.__class__,
-                                           instance=self,
-                                           using=using)
+            if send_delete_signal():
+                models.signals.pre_delete.send(sender=self.__class__,
+                                               instance=self,
+                                               using=using)
             pre_soft_delete.send(sender=self.__class__,
                                  instance=self,
                                  using=using)
@@ -285,9 +287,10 @@ class SoftDeleteObject(models.Model):
                     self._do_delete(cs, x)
                 logging.debug("FINISHED SOFT DELETING RELATED %s", self)
 
-                models.signals.post_delete.send(sender=self.__class__,
-                                                instance=self,
-                                                using=using)
+                if send_delete_signal():
+                    models.signals.post_delete.send(sender=self.__class__,
+                                                    instance=self,
+                                                    using=using)
                 post_soft_delete.send(sender=self.__class__,
                                       instance=self,
                                       using=using)

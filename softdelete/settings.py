@@ -1,38 +1,17 @@
-import sys
+from django.conf import settings
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': 'my_db',
-        }
-    }
-TEMPLATE_LOADERS = (
-    'django.template.loaders.app_directories.Loader',
-    'django.template.loaders.filesystem.Loader',
-    'django.template.loaders.eggs.Loader',
-)
+_default = {
+    'SEND_DELETE_SIGNAL': True
+}
 
 
-INSTALLED_APPS = [
-    'softdelete',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.admin',
-]
+def send_delete_signal():
+    """
+    If true the pre_delete and post_delete signals will be sent in case of a soft delete and an hard delete. 
+    If false the pre_delete and post_delete signals will only be sent in case of a hard delete.
 
-MIDDLEWARE_CLASSES = [
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.auth.middleware.SessionAuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-]
-
-
-DOMAIN = 'http://testserver'
-ROOT_URLCONF = 'softdelete.urls'
-SECRET_KEY = "dummy"
-
-if 'test' in sys.argv:
-    INSTALLED_APPS.append("softdelete.test_softdelete_app")
+    """
+    try:
+        return settings.SOFTDELETE['SEND_DELETE_SIGNAL']
+    except:
+        return _default['SEND_DELETE_SIGNAL']

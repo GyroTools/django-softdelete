@@ -200,6 +200,40 @@ class DeleteTest(BaseTest):
         self._posttest()
 
 
+class DeleteNoSignalTest(DeleteTest):
+
+    def _posttest(self):
+        self.tmo1 = TestModelOne.objects.all_with_deleted().get(pk=self.tmo1.pk)
+        self.tmo2 = TestModelOne.objects.all_with_deleted().get(pk=self.tmo2.pk)
+        self.assertTrue(self.tmo1.deleted)
+        self.assertFalse(self.tmo2.deleted)
+        self.assertFalse(self.pre_delete_called)
+        self.assertFalse(self.post_delete_called)
+        self.assertTrue(self.pre_soft_delete_called)
+        self.assertTrue(self.post_soft_delete_called)
+        self.tmo1.undelete()
+
+    @override_settings(SOFTDELETE={
+        'SEND_DELETE_SIGNAL': False,
+    })
+    def test_delete(self):
+        super().test_delete()
+
+    @override_settings(SOFTDELETE={
+        'SEND_DELETE_SIGNAL': False,
+    })
+    def test_hard_delete(self):
+        super().test_hard_delete()
+        self.assertTrue(self.pre_delete_called)
+        self.assertTrue(self.post_delete_called)
+
+    @override_settings(SOFTDELETE={
+        'SEND_DELETE_SIGNAL': False,
+    })
+    def test_filter_delete(self):
+        super().test_filter_delete()
+
+
 class AdminTest(BaseTest):
     def test_admin(self):
         client = Client()
