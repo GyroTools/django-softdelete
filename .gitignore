@@ -1,12 +1,16 @@
 *.pyc
 *.pyo
 *~
+.eggs
 .installed.cfg
 bin
+build
 develop-eggs
 dist
 downloads
 eggs
+env
 parts
 src/*.egg-info
 my_db
+.idea/*
