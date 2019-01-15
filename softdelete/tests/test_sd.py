@@ -199,6 +199,54 @@ class DeleteTest(BaseTest):
             parent=self.tmo_soft_delete_relation_parent).first()
         self.assertIsNotNone(self.tmo_soft_delete_relation_second_child.deleted_at)
 
+    def test_soft_delete_hard_delete_policy(self):
+        self.tmo_soft_delete.delete(force_policy=SoftDeleteObject.HARD_DELETE)
+        self.assertFalse(TestModelSoftDelete.objects.all_with_deleted().filter(
+            id=self.tmo_soft_delete.id).exists())
+
+    def test_soft_delete_hard_delete_policy_filter(self):
+        TestModelSoftDelete.objects.filter(pk=self.tmo_soft_delete.id).\
+            delete(force_policy=SoftDeleteObject.HARD_DELETE)
+        self.assertFalse(TestModelSoftDelete.objects.all_with_deleted().filter(
+            id=self.tmo_soft_delete.id).exists())
+
+    def test_soft_delete_hard_delete_policy_on_soft_deleted(self):
+        self.tmo_soft_delete.delete()
+
+        self.assertTrue(TestModelSoftDelete.objects.all_with_deleted().filter(
+            id=self.tmo_soft_delete.id,
+            deleted_at__isnull=False).exists())
+        self.assertTrue(ChangeSet.objects.filter(
+            object_id=self.tmo_soft_delete.id,
+            content_type=ContentType.objects.get_for_model(self.tmo_soft_delete)).exists())
+
+        self.tmo_soft_delete.delete(force_policy=SoftDeleteObject.HARD_DELETE)
+
+        self.assertFalse(TestModelSoftDelete.objects.all_with_deleted().filter(
+            id=self.tmo_soft_delete.id).exists())
+        self.assertFalse(ChangeSet.objects.filter(
+            object_id=self.tmo_soft_delete.id,
+            content_type=ContentType.objects.get_for_model(self.tmo_soft_delete)).exists())
+
+    def test_soft_delete_cascade_hard_delete_policy(self):
+        self.tmo_soft_delete_cascade.delete(force_policy=SoftDeleteObject.HARD_DELETE)
+
+        self.assertFalse(TestModelSafeDeleteCascade.objects.all_with_deleted().filter(
+            id=self.tmo_soft_delete_cascade.id).exists())
+
+        self.assertFalse(TestModelSoftDelete.objects.all_with_deleted().filter(
+            id=self.tmo_soft_delete.id).exists())
+
+    def test_soft_delete_cascade_hard_delete_policy_filter(self):
+        TestModelSafeDeleteCascade.objects.filter(pk=self.tmo_soft_delete_cascade.id)\
+            .delete(force_policy=SoftDeleteObject.HARD_DELETE)
+
+        self.assertFalse(TestModelSafeDeleteCascade.objects.all_with_deleted().filter(
+            id=self.tmo_soft_delete_cascade.id).exists())
+
+        self.assertFalse(TestModelSoftDelete.objects.all_with_deleted().filter(
+            id=self.tmo_soft_delete.id).exists())
+
     def test_soft_delete_one_to_one_not_softdele_object(self):
         self.tmo_soft_delete_relation_parent.delete()
         with self.assertRaises(TestModelOneToOneRelationWithNonSoftDeleteObject.DoesNotExist):

@@ -140,6 +140,7 @@ class SoftDeleteObject(models.Model):
     SOFT_DELETE_CASCADE = 1
     DO_NOTHING = 2
     SET_NULL = 3
+    HARD_DELETE = 4
 
     softdelete_policy = SOFT_DELETE_CASCADE
 
@@ -233,7 +234,13 @@ class SoftDeleteObject(models.Model):
         policy = kwargs.get('force_policy', self.softdelete_policy)
         user = kwargs.get('user', None)
 
-        if self.deleted_at:
+        if policy in [self.HARD_DELETE]:
+            logging.debug("HARD DELETEING forced by policy type %s, %s", type(self), self)
+            kwargs.pop('user', None)
+            kwargs.pop('force_policy', None)
+            super(SoftDeleteObject, self).delete(*args, **kwargs)
+
+        elif self.deleted_at:
             logging.debug("HARD DELETEING type %s, %s", type(self), self)
             try:
                 cs = ChangeSet.objects.get(
