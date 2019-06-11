@@ -17,4 +17,4 @@ import sys
 if 'test' in sys.argv:
     from django.contrib import admin
     admin.autodiscover()
-    urlpatterns.append(url(r'^admin/', include(admin.site.urls)))
+    urlpatterns.append(url(r'^admin/', admin.site.urls))
