@@ -392,6 +392,7 @@ class SoftDeleteRecord(models.Model):
     record = GenericForeignKey('content_type', 'object_id')
 
     class Meta:
+        ordering = ('id', )
         unique_together = (('changeset', 'content_type', 'object_id'),)
         index_together = [
             ("content_type", "object_id"),
