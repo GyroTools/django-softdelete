@@ -250,7 +250,7 @@ class SoftDeleteObject(models.Model):
                 cs.delete()
                 kwargs.pop('user', None)
                 super(SoftDeleteObject, self).delete(*args, **kwargs)
-            except:
+            except Exception as e:
                 try:
                     cs = kwargs.get('changeset') or _determine_change_set(self, user=user)
                     rs = SoftDeleteRecord.objects.get(
@@ -262,8 +262,10 @@ class SoftDeleteObject(models.Model):
                     else:
                         rs.delete()
                     super(SoftDeleteObject, self).delete(*args, **kwargs)
+                except Exception as e:
+                    logging.error(f'Failed to delete object: {self}: {e}')
                 except:
-                    pass
+                    logging.error(f'Failed to delete object: {self}: ')
         elif policy in [self.SOFT_DELETE, self.SOFT_DELETE_CASCADE]:
             using = kwargs.get('using', settings.DATABASES['default'])
             cs = kwargs.get('changeset') or _determine_change_set(self, user=user)
@@ -304,9 +306,10 @@ class SoftDeleteObject(models.Model):
                                       changeset=cs,
                                       using=using)
 
-    def _do_undelete(self, using='default'):
+    def _do_undelete(self, soft_delete_model, using='default'):
         pre_undelete.send(sender=self.__class__,
                           instance=self,
+                          soft_delete_model=soft_delete_model,
                           using=using)
         self.deleted_at = None
         self.save()
@@ -363,9 +366,15 @@ class ChangeSet(models.Model):
 
     def undelete(self, using='default'):
         logging.debug("CHANGESET UNDELETE: %s" % self)
-        self.content._do_undelete(using)
+        try:
+            self.content._do_undelete(self, using)
+        except Exception as e:
+            #  ToDo: Is there a general DoesNotExists Exception?
+            logger.warn(f'CHANGESET UNDELETE: Failed to delete changeset content: {e}')
+
         for related in self.soft_delete_records.all():
             related.undelete(using)
+
         self.delete()
         logging.debug("FINISHED CHANGESET UNDELETE: %s", self)
 
@@ -398,7 +407,10 @@ class SoftDeleteRecord(models.Model):
         self.record = obj
 
     def undelete(self, using='default'):
-        self.content._do_undelete(using)
+        try:
+            self.content._do_undelete(self, using)
+        except Exception:
+            logger.warn(f'SoftDeleteRecord UNDELETE: Failed to delete SoftDeleteRecord content: {e}')
 
     def __str__(self):
         return u'SoftDeleteRecord: (%s), (%s/%s), %s' % (
