@@ -370,7 +370,7 @@ class ChangeSet(models.Model):
             self.content._do_undelete(self, using)
         except Exception as e:
             #  ToDo: Is there a general DoesNotExists Exception?
-            logger.warn(f'CHANGESET UNDELETE: Failed to delete changeset content: {e}')
+            logging.warn(f'CHANGESET UNDELETE: Failed to delete changeset content: {e}')
 
         for related in self.soft_delete_records.all():
             related.undelete(using)
@@ -411,7 +411,7 @@ class SoftDeleteRecord(models.Model):
         try:
             self.content._do_undelete(self, using)
         except Exception:
-            logger.warn(f'SoftDeleteRecord UNDELETE: Failed to delete SoftDeleteRecord content: {e}')
+            logging.warn(f'SoftDeleteRecord UNDELETE: Failed to delete SoftDeleteRecord content: {e}')
 
     def __str__(self):
         return u'SoftDeleteRecord: (%s), (%s/%s), %s' % (
