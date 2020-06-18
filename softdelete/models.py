@@ -8,7 +8,7 @@ from django.db.models import query, CASCADE
 from django.db import models
 from django.core.exceptions import ObjectDoesNotExist
 from django.contrib.contenttypes.models import ContentType
-from django.utils.encoding import python_2_unicode_compatible
+from six import python_2_unicode_compatible
 
 from softdelete.settings import send_delete_signal
 
