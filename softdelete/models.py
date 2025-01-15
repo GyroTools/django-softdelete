@@ -59,6 +59,12 @@ class SoftDeleteQuerySet(query.QuerySet):
     def delete(self, using='default', *args, **kwargs):
         if not len(self):
             return
+
+        policy = kwargs.get('force_policy')
+        if policy == SoftDeleteObject.HARD_DELETE:
+            kwargs.pop('force_policy', None)
+            return super().delete()
+
         user = kwargs.get('user', None)
         cs = kwargs.get('changeset')
         logging.debug("STARTING QUERYSET SOFT-DELETE: %s. %s", self, len(self))
