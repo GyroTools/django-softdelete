@@ -1,11 +1,9 @@
-from django.conf import settings
-from django.test import TestCase, Client
 from django.contrib.auth.models import User
-from django.db import models
-from softdelete.test_softdelete_app.models import TestModelOne, TestModelTwo, TestModelThree
+from django.test import TestCase, Client
+
 from softdelete.models import *
-from softdelete.signals import *
-import logging
+from softdelete.test_softdelete_app.models import TestModelOne, TestModelTwo, TestModelThree
+
 try:
     from django.core.urlresolvers import reverse
 except ImportError:

@@ -62,7 +62,7 @@ class TestModelOneToOneRelationWithNonSoftDeleteObject(models.Model):
 
 
 class TestModelDefault(SoftDeleteObject):
-    parent = models.ForeignKey(TestModelSoftDelete, related_name='y')
+    parent = models.ForeignKey(TestModelSoftDelete, related_name='y', on_delete=models.CASCADE)
 
 
 admin.site.register(TestModelOne, SoftDeleteObjectAdmin)

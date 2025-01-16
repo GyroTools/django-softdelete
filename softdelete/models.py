@@ -50,30 +50,175 @@ def _determine_change_set(obj, create=True, user=None):
     return qs
 
 
+def _get_existing_changesets(queryset, changesets, user=None):
+    pks = list(queryset.values_list('pk', flat=True))
+    existing_changesets = ChangeSet.objects.filter(content_type=ContentType.objects.get_for_model(queryset.model),
+                                                   object_id__in=pks, user=user)
+    for ecs in existing_changesets:
+        changesets[ecs.object_id] = ecs
+
+    return changesets
+
+
+def _determine_change_set_for_queryset(queryset, cs=None, user=None):
+    pks = list(queryset.values_list('pk', flat=True))
+
+    existing_records = SoftDeleteRecord.objects.filter(content_type=ContentType.objects.get_for_model(queryset.model),
+                                                       object_id__in=pks).values_list('object_id', 'changeset')
+
+    if cs:
+        changesets = {str(pk): cs for pk in pks}
+        existing_records = [object_id for object_id, changeset in existing_records]
+        return changesets, existing_records
+
+    changesets = {object_id: changeset for object_id, changeset in existing_records}
+    existing_records = [object_id for object_id, changeset in existing_records]
+    _get_existing_changesets(queryset, changesets, user=user)
+
+    changesets_to_create = []
+    for obj in queryset:
+        if not obj.pk in changesets:
+            changesets_to_create.append(ChangeSet(content_type=ContentType.objects.get_for_model(obj),
+                                                  object_id=str(obj.pk), user=user))
+
+    ChangeSet.objects.bulk_create(changesets_to_create)
+
+    _get_existing_changesets(queryset, changesets, user=user)
+
+    return changesets, existing_records
+
+
 class SoftDeleteQuerySet(query.QuerySet):
     def all_with_deleted(self):
         qs = super(SoftDeleteQuerySet, self).all()
         qs.__class__ = SoftDeleteQuerySet
         return qs
 
+    def _handle_cascade(self, queryset, changesets):
+        # Retrieve related fields once
+        instance = queryset.first()
+        all_related = [
+            f for f in instance._meta.get_fields()
+            if (f.one_to_many or f.one_to_one)
+               and f.auto_created and not f.concrete
+        ]
+
+        # Handle related objects in bulk
+        for related_field in all_related:
+            self._do_delete(queryset, changesets, related_field)
+
+        logging.debug("FINISHED SOFT DELETING RELATED OBJECTS FOR QUERYSET")
+
+    def _do_delete(self, queryset, changesets, related, force_policy=None):
+        rel = related.get_accessor_name()
+
+        relation_policy = SoftDeleteObject.softdelete_relation_policy.get(rel)
+        if force_policy:
+            relation_policy = force_policy
+
+        # if the policy for this relation is set to SOFT_DELETE
+        # we should just end processing of this relation
+        if relation_policy == SoftDeleteObject.DO_NOTHING:
+            return
+
+            # Get related manager name
+            related_manager_name = related.get_accessor_name()
+
+            if related.one_to_one:
+                # For one-to-one relationships, handle each related object individually
+                related_objects = [getattr(instance, related_manager_name) for instance in queryset if
+                                   hasattr(instance, related_manager_name)]
+                for obj in related_objects:
+                    if relation_policy == self.SET_NULL:
+                        setattr(obj, related.field.name, None)
+                        obj.save()
+                    else:
+                        if isinstance(obj, SoftDeleteObject):
+                            obj.delete(changeset=changeset, force_policy=force_policy)
+                        else:
+                            obj.delete()
+            elif related.one_to_many:
+                # For one-to-many relationships, handle related objects in bulk
+                related_queryset = related.related_model.objects.filter(**{related.field.name + '__in': queryset})
+                if relation_policy == self.SET_NULL:
+                    related_queryset.update(**{related.field.name: None})
+                else:
+                    if issubclass(related.related_model, SoftDeleteObject):
+                        related_queryset.delete(changeset=changeset, force_policy=force_policy)
+                    else:
+                        related_queryset.delete()
+
+        for instance in queryset:
+            if not hasattr(instance, rel):
+                continue
+
+            cs = changesets[str(instance.pk)]
+            delete_kwargs = {'changeset': cs}
+            if force_policy:
+                delete_kwargs['force_policy'] = force_policy
+
+            if related.one_to_one:
+                obj = getattr(instance, rel)
+                if relation_policy == SoftDeleteObject.SET_NULL:
+                    setattr(obj, related.field.name, None)
+                    obj.save()
+                else:
+                    if isinstance(obj, SoftDeleteObject):
+                        obj.delete(**delete_kwargs)
+                    else:
+                        obj.delete()
+            elif related.one_to_many:
+                if relation_policy == SoftDeleteObject.SET_NULL:
+                    getattr(instance, rel).all().update(**{related.field.name: None})
+                else:
+                    qs = getattr(instance, rel).all()
+                    if isinstance(qs, SoftDeleteQuerySet):
+                        qs.delete(**delete_kwargs)
+                    else:
+                        qs.delete()
+
     def delete(self, using='default', *args, **kwargs):
         if not len(self):
             return
 
-        policy = kwargs.get('force_policy')
+        # if we are forcing a hard delete, we should not create any records. Just call the default queryset delete
+        # method
+        policy = kwargs.get('force_policy', SoftDeleteObject.softdelete_policy)
         if policy == SoftDeleteObject.HARD_DELETE:
             kwargs.pop('force_policy', None)
             return super().delete()
 
+        already_deleted = self.filter(deleted_at__isnull=False)
+        to_delete = self.filter(deleted_at=None)
+
         user = kwargs.get('user', None)
         cs = kwargs.get('changeset')
         logging.debug("STARTING QUERYSET SOFT-DELETE: %s. %s", self, len(self))
-        for obj in self:
-            rs, c = SoftDeleteRecord.objects.get_or_create(changeset=cs or _determine_change_set(obj, user=user),
-                                                           content_type=ContentType.objects.get_for_model(obj),
-                                                           object_id=str(obj.pk))
-            logging.debug(" -----  CALLING delete() on %s", obj)
-            obj.delete(using, *args, **kwargs)
+
+        # mb: bulk create all records first, then delete all objects
+        changesets, existing_records = _determine_change_set_for_queryset(to_delete, cs=cs, user=user)
+        records_to_create = []
+        for obj in to_delete:
+            if not obj.pk in existing_records:
+                cur_cs = cs or changesets[str(obj.pk)]
+                records_to_create.append(SoftDeleteRecord(changeset=cur_cs,
+                                         content_type=ContentType.objects.get_for_model(obj),
+                                         object_id=str(obj.pk)))
+        SoftDeleteRecord.objects.bulk_create(records_to_create)
+
+        # handle cascade delete
+        if policy == SoftDeleteObject.SOFT_DELETE_CASCADE:
+            self._handle_cascade(to_delete, changesets)
+
+        to_delete.update(deleted_at=timezone.now())
+
+        if already_deleted.count() > 0:
+            changesets_to_delete = ChangeSet.objects.get(
+                content_type=ContentType.objects.get_for_model(self),
+                object_id=list(already_deleted.values_list('pk', flat=True)),
+                user=user)
+            changesets_to_delete.delete()
+            already_deleted.delete(force_policy=SoftDeleteObject.HARD_DELETE)
 
     def undelete(self, using='default', *args, **kwargs):
         logging.debug("UNDELETING %s", self)
