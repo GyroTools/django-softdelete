@@ -199,15 +199,14 @@ class SoftDeleteQuerySet(query.QuerySet):
 
     def delete(self, using='default', *args, **kwargs):
         if not len(self):
-            return None
+            return
 
         # if we are forcing a hard delete, we should not create any records. Just call the default queryset delete
         # method
         policy = kwargs.get('force_policy', SoftDeleteObject.softdelete_policy)
         if policy == SoftDeleteObject.HARD_DELETE:
             kwargs.pop('force_policy', None)
-            super().delete()
-            return None
+            return super().delete()
 
         already_deleted = self.filter(deleted_at__isnull=False)
         to_delete = self.filter(deleted_at=None)
@@ -219,6 +218,12 @@ class SoftDeleteQuerySet(query.QuerySet):
 
         # mb: bulk create all records first, then delete all objects
         changesets, existing_records = _determine_change_set_for_queryset(to_delete, cs=cs, changesets=changesets, user=user)
+
+        pre_soft_delete_queryset.send(sender=self.__class__,
+                                      queryset=self,
+                                      changesets=changesets,
+                                      using=using)
+
         records_to_create = []
         for obj in to_delete:
             if not obj.pk in existing_records:
@@ -242,7 +247,10 @@ class SoftDeleteQuerySet(query.QuerySet):
             changesets_to_delete.delete()
             already_deleted.delete(force_policy=SoftDeleteObject.HARD_DELETE)
 
-        return changesets
+        post_soft_delete_queryset.send(sender=self.__class__,
+                                       queryset=self,
+                                       changesets=changesets,
+                                       using=using)
 
     def undelete(self, using='default', *args, **kwargs):
         logging.debug("UNDELETING %s", self)

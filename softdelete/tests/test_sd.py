@@ -117,17 +117,31 @@ class DeleteTest(BaseTest):
         self.post_soft_delete_called = True
         self.post_soft_delete_kwargs = kwargs
 
+    def pre_soft_delete_queryset(self, *args, **kwargs):
+        self.pre_soft_delete_queryset_called = True
+        self.pre_soft_delete_queryset_kwargs = kwargs
+
+    def post_soft_delete_queryset(self, *args, **kwargs):
+        self.post_soft_delete_queryset_called = True
+        self.post_soft_delete_querysetkwargs = kwargs
+
     def _pretest(self):
         self.pre_delete_called = False
         self.post_delete_called = False
         self.pre_soft_delete_called = False
         self.post_soft_delete_called = False
+        self.pre_soft_delete_queryset_called = False
+        self.post_soft_delete_queryset_called = False
         self.pre_soft_delete_kwargs = None
         self.post_soft_delete_kwargs = None
+        self.pre_soft_delete_queryset_kwargs = None
+        self.post_soft_delete_queryset_kwargs = None
         models.signals.pre_delete.connect(self.pre_delete)
         models.signals.post_delete.connect(self.post_delete)
         pre_soft_delete.connect(self.pre_soft_delete)
         post_soft_delete.connect(self.post_soft_delete)
+        pre_soft_delete_queryset.connect(self.pre_soft_delete_queryset)
+        post_soft_delete_queryset.connect(self.post_soft_delete_queryset)
         self.assertEquals(2, TestModelOne.objects.count())
         self.assertEquals(10, TestModelTwo.objects.count())
         self.assertFalse(self.tmo1.deleted)
@@ -138,12 +152,19 @@ class DeleteTest(BaseTest):
         self.cs_count = ChangeSet.objects.count()
         self.rs_count = SoftDeleteRecord.objects.count()
 
-    def _posttest(self, signal_called=True):
+    def _posttest(self, is_queryset=False):
         self.tmo1 = TestModelOne.objects.all_with_deleted().get(pk=self.tmo1.pk)
         self.tmo2 = TestModelOne.objects.all_with_deleted().get(pk=self.tmo2.pk)
         self.assertTrue(self.tmo1.deleted)
         self.assertFalse(self.tmo2.deleted)
-        if signal_called:
+        if is_queryset:
+            self.assertFalse(self.pre_delete_called)
+            self.assertFalse(self.post_delete_called)
+            self.assertFalse(self.pre_soft_delete_called)
+            self.assertFalse(self.post_soft_delete_called)
+            self.assertTrue(self.pre_soft_delete_queryset_called)
+            self.assertTrue(self.post_soft_delete_queryset_called)
+        else:
             self.assertTrue(self.pre_delete_called)
             self.assertTrue(self.post_delete_called)
             self.assertTrue(self.pre_soft_delete_called)
@@ -258,21 +279,29 @@ class DeleteTest(BaseTest):
         TestModelOne.objects.filter(pk=1).delete()
         self.assertEquals(self.cs_count+1, ChangeSet.objects.count())
         self.assertEquals(self.rs_count+56, SoftDeleteRecord.objects.count())
-        self._posttest(signal_called=False)
+        self._posttest(is_queryset=True)
 
 
 class DeleteNoSignalTest(DeleteTest):
 
-    def _posttest(self, signal_called=True):
+    def _posttest(self, is_queryset=False):
         self.tmo1 = TestModelOne.objects.all_with_deleted().get(pk=self.tmo1.pk)
         self.tmo2 = TestModelOne.objects.all_with_deleted().get(pk=self.tmo2.pk)
         self.assertTrue(self.tmo1.deleted)
         self.assertFalse(self.tmo2.deleted)
-        if signal_called:
+        if is_queryset:
+            self.assertFalse(self.pre_delete_called)
+            self.assertFalse(self.post_delete_called)
+            self.assertFalse(self.pre_soft_delete_called)
+            self.assertFalse(self.post_soft_delete_called)
+            self.assertTrue(self.pre_soft_delete_queryset_called)
+            self.assertTrue(self.post_soft_delete_queryset_called)
+        else:
             self.assertFalse(self.pre_delete_called)
             self.assertFalse(self.post_delete_called)
             self.assertTrue(self.pre_soft_delete_called)
             self.assertTrue(self.post_soft_delete_called)
+
         self.tmo1.undelete()
 
     @override_settings(SOFTDELETE={
@@ -448,15 +477,27 @@ class DeleteWithUserTest(BaseTest):
     def post_soft_delete(self, *args, **kwargs):
         self.post_soft_delete_called = True
 
+    def pre_soft_delete_queryset(self, *args, **kwargs):
+        self.pre_soft_delete_queryset_called = True
+        self.pre_soft_delete_queryset_kwargs = kwargs
+
+    def post_soft_delete_queryset(self, *args, **kwargs):
+        self.post_soft_delete_queryset_called = True
+        self.post_soft_delete_querysetkwargs = kwargs
+
     def _pretest(self):
         self.pre_delete_called = False
         self.post_delete_called = False
         self.pre_soft_delete_called = False
         self.post_soft_delete_called = False
+        self.pre_soft_delete_queryset_called = False
+        self.post_soft_delete_queryset_called = False
         models.signals.pre_delete.connect(self.pre_delete)
         models.signals.post_delete.connect(self.post_delete)
         pre_soft_delete.connect(self.pre_soft_delete)
         post_soft_delete.connect(self.post_soft_delete)
+        pre_soft_delete_queryset.connect(self.pre_soft_delete_queryset)
+        post_soft_delete_queryset.connect(self.post_soft_delete_queryset)
         self.assertEquals(2, TestModelOne.objects.count())
         self.assertEquals(10, TestModelTwo.objects.count())
         self.assertFalse(self.tmo1.deleted)
@@ -467,16 +508,24 @@ class DeleteWithUserTest(BaseTest):
         self.cs_count = ChangeSet.objects.count()
         self.rs_count = SoftDeleteRecord.objects.count()
 
-    def _posttest(self, user=None, signal_called=True):
+    def _posttest(self, user=None, is_queryset=False):
         self.tmo1 = TestModelOne.objects.all_with_deleted().get(pk=self.tmo1.pk)
         self.tmo2 = TestModelOne.objects.all_with_deleted().get(pk=self.tmo2.pk)
         self.assertTrue(self.tmo1.deleted)
         self.assertFalse(self.tmo2.deleted)
-        if signal_called:
+        if is_queryset:
+            self.assertFalse(self.pre_delete_called)
+            self.assertFalse(self.post_delete_called)
+            self.assertFalse(self.pre_soft_delete_called)
+            self.assertFalse(self.post_soft_delete_called)
+            self.assertTrue(self.pre_soft_delete_queryset_called)
+            self.assertTrue(self.post_soft_delete_queryset_called)
+        else:
             self.assertTrue(self.pre_delete_called)
             self.assertTrue(self.post_delete_called)
             self.assertTrue(self.pre_soft_delete_called)
             self.assertTrue(self.post_soft_delete_called)
+
         self.tmo1.undelete(user=user)
 
     def test_delete(self):
@@ -507,14 +556,13 @@ class DeleteWithUserTest(BaseTest):
         self._pretest()
         qs = TestModelOne.objects.filter(pk=1)
         obj = qs.first()
-        changesets = qs.delete(user=self.user)
+        qs.delete(user=self.user)
         self.assertEquals(self.cs_count+1, ChangeSet.objects.count())
         cs = ChangeSet.objects.get(user=self.user)
-        self.assertEqual(changesets[str(obj.pk)].id, cs.id)
         self.assertEqual(56, cs.soft_delete_records.count())
 
         self.assertEquals(self.rs_count+56, SoftDeleteRecord.objects.count())
-        self._posttest(user=self.user, signal_called=False)
+        self._posttest(user=self.user, is_queryset=True)
 
     def test_filter_delete_existing_changeset(self):
         self._pretest()
@@ -523,8 +571,7 @@ class DeleteWithUserTest(BaseTest):
         content_type = ContentType.objects.get_for_model(obj)
         cs0 = ChangeSet.objects.create(content_type=content_type, object_id=str(obj.pk), user=self.user)
         cs_count_2 = ChangeSet.objects.count()
-        changesets = qs.delete(user=self.user)
-        self.assertEqual(changesets[str(obj.pk)].id, cs0.id)
+        qs.delete(user=self.user)
         self.assertEquals(self.cs_count+1, ChangeSet.objects.count())
         self.assertEquals(cs_count_2, ChangeSet.objects.count())
         self.assertTrue(SoftDeleteRecord.objects.filter(changeset=cs0, object_id=str(obj.pk)).exists())
@@ -533,7 +580,7 @@ class DeleteWithUserTest(BaseTest):
         self.assertEqual(56, cs.soft_delete_records.count())
 
         self.assertEquals(self.rs_count+56, SoftDeleteRecord.objects.count())
-        self._posttest(user=self.user, signal_called=False)
+        self._posttest(user=self.user, is_queryset=True)
 
     def test_filter_delete_existing_record(self):
         self._pretest()
@@ -542,8 +589,7 @@ class DeleteWithUserTest(BaseTest):
         content_type = ContentType.objects.get_for_model(obj)
         cs0 = ChangeSet.objects.create(content_type=content_type, object_id=str(obj.pk), user=self.user)
         r0 = SoftDeleteRecord.objects.create(changeset=cs0, content_type=content_type, object_id=str(obj.pk))
-        changesets = qs.delete(user=self.user)
-        self.assertEqual(changesets[str(obj.pk)].id, cs0.id)
+        qs.delete(user=self.user)
         self.assertEquals(self.cs_count+1, ChangeSet.objects.count())
         cs = ChangeSet.objects.get(user=self.user)
         r = SoftDeleteRecord.objects.get(changeset=cs, object_id=str(obj.pk))
@@ -552,7 +598,7 @@ class DeleteWithUserTest(BaseTest):
         self.assertEqual(56, cs.soft_delete_records.count())
 
         self.assertEquals(self.rs_count+56, SoftDeleteRecord.objects.count())
-        self._posttest(user=self.user, signal_called=False)
+        self._posttest(user=self.user, is_queryset=True)
 
     def test_filter_delete_changesets_input(self):
         self._pretest()
@@ -562,9 +608,7 @@ class DeleteWithUserTest(BaseTest):
         cs0 = ChangeSet.objects.create(content_type=ContentType.objects.get_for_model(obj), object_id=str(obj.pk+1), user=self.user)
         cs_count_2 = ChangeSet.objects.count()
         changesets = {obj.pk: cs0}
-        changesets2 = qs.delete(user=self.user, changesets=changesets)
-        self.assertEqual(len(changesets), len(changesets2))
-        self.assertEqual(changesets2[str(obj.pk)].id, cs0.id)
+        qs.delete(user=self.user, changesets=changesets)
         self.assertEquals(self.cs_count+1, ChangeSet.objects.count())
         self.assertEquals(cs_count_2, ChangeSet.objects.count())
         self.assertTrue(SoftDeleteRecord.objects.filter(changeset=cs0, object_id=str(obj.pk)).exists())
@@ -573,7 +617,7 @@ class DeleteWithUserTest(BaseTest):
         self.assertEqual(56, cs.soft_delete_records.count())
 
         self.assertEquals(self.rs_count+56, SoftDeleteRecord.objects.count())
-        self._posttest(user=self.user, signal_called=False)
+        self._posttest(user=self.user, is_queryset=True)
 
     def test_filter_delete_changesets_input_multi(self):
         self._pretest()
@@ -585,8 +629,7 @@ class DeleteWithUserTest(BaseTest):
             changesets[obj.pk] = cs
 
         cs_count_2 = ChangeSet.objects.count()
-        changesets2 = qs.delete(user=self.user, changesets=changesets)
-        self.assertEqual(len(changesets), len(changesets2))
+        qs.delete(user=self.user, changesets=changesets)
         self.assertEquals(cs_count_2, ChangeSet.objects.count())
         for pk, cs in changesets.items():
             self.assertTrue(SoftDeleteRecord.objects.filter(changeset=cs, object_id=str(obj.pk)).exists())
