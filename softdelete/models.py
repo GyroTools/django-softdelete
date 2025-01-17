@@ -205,8 +205,15 @@ class SoftDeleteQuerySet(query.QuerySet):
         # method
         policy = kwargs.get('force_policy', SoftDeleteObject.softdelete_policy)
         if policy == SoftDeleteObject.HARD_DELETE:
+            pre_delete_queryset.send(sender=self.model,
+                                          queryset=self,
+                                          using=using)
             kwargs.pop('force_policy', None)
-            return super().delete()
+            super().delete()
+            post_delete_queryset.send(sender=self.model,
+                                 queryset=self,
+                                 using=using)
+            return
 
         already_deleted = self.filter(deleted_at__isnull=False)
         to_delete = self.filter(deleted_at=None)
@@ -219,7 +226,7 @@ class SoftDeleteQuerySet(query.QuerySet):
         # mb: bulk create all records first, then delete all objects
         changesets, existing_records = _determine_change_set_for_queryset(to_delete, cs=cs, changesets=changesets, user=user)
 
-        pre_soft_delete_queryset.send(sender=self.__class__,
+        pre_soft_delete_queryset.send(sender=self.model,
                                       queryset=self,
                                       changesets=changesets,
                                       using=using)
@@ -247,7 +254,7 @@ class SoftDeleteQuerySet(query.QuerySet):
             changesets_to_delete.delete()
             already_deleted.delete(force_policy=SoftDeleteObject.HARD_DELETE)
 
-        post_soft_delete_queryset.send(sender=self.__class__,
+        post_soft_delete_queryset.send(sender=self.model,
                                        queryset=self,
                                        changesets=changesets,
                                        using=using)
