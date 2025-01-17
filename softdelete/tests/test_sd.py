@@ -505,10 +505,95 @@ class DeleteWithUserTest(BaseTest):
 
     def test_filter_delete(self):
         self._pretest()
-        TestModelOne.objects.filter(pk=1).delete(user=self.user)
+        qs = TestModelOne.objects.filter(pk=1)
+        obj = qs.first()
+        changesets = qs.delete(user=self.user)
         self.assertEquals(self.cs_count+1, ChangeSet.objects.count())
         cs = ChangeSet.objects.get(user=self.user)
+        self.assertEqual(changesets[str(obj.pk)].id, cs.id)
         self.assertEqual(56, cs.soft_delete_records.count())
 
         self.assertEquals(self.rs_count+56, SoftDeleteRecord.objects.count())
         self._posttest(user=self.user, signal_called=False)
+
+    def test_filter_delete_existing_changeset(self):
+        self._pretest()
+        qs = TestModelOne.objects.filter(pk=1)
+        obj = qs.first()
+        content_type = ContentType.objects.get_for_model(obj)
+        cs0 = ChangeSet.objects.create(content_type=content_type, object_id=str(obj.pk), user=self.user)
+        cs_count_2 = ChangeSet.objects.count()
+        changesets = qs.delete(user=self.user)
+        self.assertEqual(changesets[str(obj.pk)].id, cs0.id)
+        self.assertEquals(self.cs_count+1, ChangeSet.objects.count())
+        self.assertEquals(cs_count_2, ChangeSet.objects.count())
+        self.assertTrue(SoftDeleteRecord.objects.filter(changeset=cs0, object_id=str(obj.pk)).exists())
+        cs = ChangeSet.objects.get(user=self.user)
+        self.assertEqual(cs.id, cs0.id)
+        self.assertEqual(56, cs.soft_delete_records.count())
+
+        self.assertEquals(self.rs_count+56, SoftDeleteRecord.objects.count())
+        self._posttest(user=self.user, signal_called=False)
+
+    def test_filter_delete_existing_record(self):
+        self._pretest()
+        qs = TestModelOne.objects.filter(pk=1)
+        obj = qs.first()
+        content_type = ContentType.objects.get_for_model(obj)
+        cs0 = ChangeSet.objects.create(content_type=content_type, object_id=str(obj.pk), user=self.user)
+        r0 = SoftDeleteRecord.objects.create(changeset=cs0, content_type=content_type, object_id=str(obj.pk))
+        changesets = qs.delete(user=self.user)
+        self.assertEqual(changesets[str(obj.pk)].id, cs0.id)
+        self.assertEquals(self.cs_count+1, ChangeSet.objects.count())
+        cs = ChangeSet.objects.get(user=self.user)
+        r = SoftDeleteRecord.objects.get(changeset=cs, object_id=str(obj.pk))
+        self.assertEqual(r.id, r0.id)
+        self.assertEqual(cs.id, cs0.id)
+        self.assertEqual(56, cs.soft_delete_records.count())
+
+        self.assertEquals(self.rs_count+56, SoftDeleteRecord.objects.count())
+        self._posttest(user=self.user, signal_called=False)
+
+    def test_filter_delete_changesets_input(self):
+        self._pretest()
+        qs = TestModelOne.objects.filter(pk=1)
+        obj = qs.first()
+        # create a changeset for a different object and then use it to delete the current object
+        cs0 = ChangeSet.objects.create(content_type=ContentType.objects.get_for_model(obj), object_id=str(obj.pk+1), user=self.user)
+        cs_count_2 = ChangeSet.objects.count()
+        changesets = {obj.pk: cs0}
+        changesets2 = qs.delete(user=self.user, changesets=changesets)
+        self.assertEqual(len(changesets), len(changesets2))
+        self.assertEqual(changesets2[str(obj.pk)].id, cs0.id)
+        self.assertEquals(self.cs_count+1, ChangeSet.objects.count())
+        self.assertEquals(cs_count_2, ChangeSet.objects.count())
+        self.assertTrue(SoftDeleteRecord.objects.filter(changeset=cs0, object_id=str(obj.pk)).exists())
+        cs = ChangeSet.objects.get(user=self.user)
+        self.assertEqual(cs.id, cs0.id)
+        self.assertEqual(56, cs.soft_delete_records.count())
+
+        self.assertEquals(self.rs_count+56, SoftDeleteRecord.objects.count())
+        self._posttest(user=self.user, signal_called=False)
+
+    def test_filter_delete_changesets_input_multi(self):
+        self._pretest()
+        qs = TestModelOne.objects.all()
+        changesets = {}
+        for obj in qs:
+            # create a changeset for a different object and then use it to delete the current object
+            cs = ChangeSet.objects.create(content_type=ContentType.objects.get_for_model(obj), object_id=str(obj.pk+100), user=self.user)
+            changesets[obj.pk] = cs
+
+        cs_count_2 = ChangeSet.objects.count()
+        changesets2 = qs.delete(user=self.user, changesets=changesets)
+        self.assertEqual(len(changesets), len(changesets2))
+        self.assertEquals(cs_count_2, ChangeSet.objects.count())
+        for pk, cs in changesets.items():
+            self.assertTrue(SoftDeleteRecord.objects.filter(changeset=cs, object_id=str(obj.pk)).exists())
+            self.assertEqual(56, cs.soft_delete_records.count())
+
+        self.assertEquals(self.rs_count+2*56, SoftDeleteRecord.objects.count())
+        self.tmo1 = TestModelOne.objects.all_with_deleted().get(pk=self.tmo1.pk)
+        self.tmo2 = TestModelOne.objects.all_with_deleted().get(pk=self.tmo2.pk)
+        self.assertTrue(self.tmo1.deleted)
+        self.assertTrue(self.tmo2.deleted)

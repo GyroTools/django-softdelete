@@ -50,34 +50,54 @@ def _determine_change_set(obj, create=True, user=None):
     return qs
 
 
-def _get_existing_changesets(queryset, changesets, user=None):
+def _get_pks(queryset, changesets=None):
+    changesets = changesets or {}
+    changesets_pks = list(changesets.keys())
+    changesets_pks = [str(pk) for pk in changesets_pks]
     pks = list(queryset.values_list('pk', flat=True))
+    pks = [str(pk) for pk in pks]
+    new_pks = list(set(pks) - set(changesets_pks))
+    return pks, new_pks
+
+
+def _get_existing_changesets(queryset, changesets=None, user=None):
+    _, new_pks = _get_pks(queryset, changesets=changesets)
+
     existing_changesets = ChangeSet.objects.filter(content_type=ContentType.objects.get_for_model(queryset.model),
-                                                   object_id__in=pks, user=user)
+                                                   object_id__in=new_pks, user=user)
     for ecs in existing_changesets:
         changesets[ecs.object_id] = ecs
 
     return changesets
 
 
-def _determine_change_set_for_queryset(queryset, cs=None, user=None):
-    pks = list(queryset.values_list('pk', flat=True))
+def _determine_change_set_for_queryset(queryset, cs=None, changesets=None, user=None):
+    changesets = changesets or {}
+    converted_changesets = {str(key): value for key, value in changesets.items()}
+    changesets = converted_changesets
 
-    existing_records = SoftDeleteRecord.objects.filter(content_type=ContentType.objects.get_for_model(queryset.model),
-                                                       object_id__in=pks).values_list('object_id', 'changeset')
+    pks, new_pks = _get_pks(queryset, changesets=changesets)
+
+    content_type = ContentType.objects.get_for_model(queryset.model)
+    existing_records_cs = SoftDeleteRecord.objects.filter(content_type=content_type,
+                                                           object_id__in=pks).select_related('changeset')
+    existing_records = [r.id for r in existing_records_cs]
 
     if cs:
-        changesets = {str(pk): cs for pk in pks}
-        existing_records = [object_id for object_id, changeset in existing_records]
+        changesets = {pk: cs for pk in pks}
         return changesets, existing_records
 
-    changesets = {object_id: changeset for object_id, changeset in existing_records}
-    existing_records = [object_id for object_id, changeset in existing_records]
+    if not new_pks or len(new_pks) == 0:
+        return changesets, existing_records
+
+    for r in existing_records_cs:
+        changesets[r.object_id] = r.changeset
+
     _get_existing_changesets(queryset, changesets, user=user)
 
     changesets_to_create = []
     for obj in queryset:
-        if not obj.pk in changesets:
+        if not str(obj.pk) in changesets:
             changesets_to_create.append(ChangeSet(content_type=ContentType.objects.get_for_model(obj),
                                                   object_id=str(obj.pk), user=user))
 
@@ -179,24 +199,26 @@ class SoftDeleteQuerySet(query.QuerySet):
 
     def delete(self, using='default', *args, **kwargs):
         if not len(self):
-            return
+            return None
 
         # if we are forcing a hard delete, we should not create any records. Just call the default queryset delete
         # method
         policy = kwargs.get('force_policy', SoftDeleteObject.softdelete_policy)
         if policy == SoftDeleteObject.HARD_DELETE:
             kwargs.pop('force_policy', None)
-            return super().delete()
+            super().delete()
+            return None
 
         already_deleted = self.filter(deleted_at__isnull=False)
         to_delete = self.filter(deleted_at=None)
 
         user = kwargs.get('user', None)
         cs = kwargs.get('changeset')
+        changesets = kwargs.get('changesets')
         logging.debug("STARTING QUERYSET SOFT-DELETE: %s. %s", self, len(self))
 
         # mb: bulk create all records first, then delete all objects
-        changesets, existing_records = _determine_change_set_for_queryset(to_delete, cs=cs, user=user)
+        changesets, existing_records = _determine_change_set_for_queryset(to_delete, cs=cs, changesets=changesets, user=user)
         records_to_create = []
         for obj in to_delete:
             if not obj.pk in existing_records:
@@ -219,6 +241,8 @@ class SoftDeleteQuerySet(query.QuerySet):
                 user=user)
             changesets_to_delete.delete()
             already_deleted.delete(force_policy=SoftDeleteObject.HARD_DELETE)
+
+        return changesets
 
     def undelete(self, using='default', *args, **kwargs):
         logging.debug("UNDELETING %s", self)
