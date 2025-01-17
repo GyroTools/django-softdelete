@@ -132,7 +132,7 @@ class SoftDeleteQuerySet(query.QuerySet):
     def _do_delete(self, queryset, changesets, related, force_policy=None):
         rel = related.get_accessor_name()
 
-        relation_policy = SoftDeleteObject.softdelete_relation_policy.get(rel)
+        relation_policy = queryset.model.softdelete_relation_policy.get(rel)
         if force_policy:
             relation_policy = force_policy
 
